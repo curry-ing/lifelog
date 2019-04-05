@@ -1,0 +1,102 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow                  # new type of k8s spec
+metadata:
+  generateName: kinsight-pipeline
+spec:
+  entrypoint: kinsight-pipeline
+  templates:
+  - name: kinsight-pipeline
+    steps:
+    - - name: merge-kinsight-logs
+        template: luigi-runner
+        arguments:
+          parameters:
+          - name: workers
+            value: 5
+          - name: module
+            value: kakaomobility.tasks.merge_kinsight
+          - name: task
+            value: KinsightPipe
+    - - name: taxi-interested-app
+        template: luigi-runner
+        arguments:
+          parameters:
+          - name: workers
+            value: 5
+          - name: module
+            value: kakaomobility.tasks.taxi.taxi_interested_app
+          - name: task
+            value: BuildTaxiInterestedAppHiveTable
+      - name: taxi-recommend-app
+        template: luigi-runner
+        arguments:
+          parameters:
+          - name: workers
+            value: 5
+          - name: module
+            value: kakaomobility.tasks.taxi.taxi_recommend_app
+          - name: task
+            value: BuildTaxiRecommendAppHiveTable
+  - name: luigi-runner
+    inputs:
+      parameters:
+      - name: workers
+      - name: module
+      - name: task
+    container:
+      image: idock.daumkakao.io/mobdata/datalab-luigi:latest
+      command: ["/app/scripts/run_luigi.sh"]
+      env:
+      - name: KEYTAB
+        value: /etc/keytab/mobdata-dev.mobility
+      - name: LUIGI_CONFIG_PATH
+        value: /etc/luigi/luigi.cfg
+      - name: LUIGI_MODULE
+        value: "{{inputs.parameters.module}}"
+      - name: LUIGI_TASK
+        value: "{{inputs.parameters.task}}"
+      - name: LUIGI_WORKER_COUNT
+        value: "{{inputs.parameters.workers}}"
+      - name: PRINCIPAL
+        value: mobdata-dev@MOBILITY.HADOOP
+      - name: TZ
+        value: Asia/Seoul
+      resources:                # limit the resources
+        limits:
+          cpu: 1
+          memory: 1G
+        requests:
+          cpu: 500m
+          memory: 500Mi
+      volumeMounts:
+      - name: common
+        mountPath: /etc/krb5.conf
+        subPath: krb5.conf
+      - name: keytabs
+        readOnly: true
+        mountPath: /etc/keytab
+      - name: luigi-config
+        readOnly: true
+        mountPath: /etc/luigi
+      - name: luigi-secret
+        readOnly: true
+        mountPath: /app/luigi/secret.py
+        subPath: secret.py
+  volumes:
+  - name: common
+    configMap:
+      name: common
+      defaultMode: 420
+  - name: keytabs
+    secret:
+      secretName: keytabs
+      defaultMode: 420
+  - name: luigi-secret
+    secret:
+      secretName: luigi-secret
+      defaultMode: 420
+  - name: luigi-config
+    configMap:
+      name: luigi
+      defaultMode: 420
+
